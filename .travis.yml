@@ -1,0 +1,12 @@
+sudo: false
+dist: trusty
+language: python
+python:
+  - 2.7
+  - 3.6
+
+install:
+  - pip install tox
+
+script:
+  - tox -e flake8,pylint,check-py27,check-py36

@@ -9,4 +9,4 @@ install:
   - pip install tox
 
 script:
-  - tox -e flake8,pylint,check-py27,check-py36
+  - tox -e flake8,pylint,check-py27,check-py36,coveralls

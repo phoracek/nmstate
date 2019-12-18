@@ -19,6 +19,7 @@
 
 from libnmstate.error import NmstateValueError
 from libnmstate.schema import OVSBridge as OB
+from libnmstate.schema import OVSBridgePortInterfaceType as OBPortInterfaceType 
 
 from . import connection
 from . import device
@@ -33,16 +34,6 @@ CAPABILITY = "openvswitch"
 
 
 _BRIDGE_OPTION_NAMES = ["fail-mode", "mcast-snooping-enable", "rstp", "stp"]
-
-
-_PORT_OPTION_NAMES = [
-    "tag",
-    "vlan-mode",
-    "bond-mode",
-    "lacp",
-    "bond-updelay",
-    "bond-downdelay",
-]
 
 
 def has_ovs_capability():
@@ -115,13 +106,19 @@ def translate_bridge_options(iface_state):
     return br_opts
 
 
-def translate_port_options(port_state):
+def translate_port_options(bridge_port_state):
+    """
+    Translate bridge's port state to separate port's options.
+    TODO: where bridge ports comes from
+    TODO: what these options contain (LAG, vlan)
+    """
     port_opts = {}
-    for key in port_state.keys() & set(_PORT_OPTION_NAMES):
-        port_opts[key] = port_state[key]
+
+    bond_mode = bridge_port_state.get('link-aggregation', {}).get('mode')
+    if bond_mode:
+        port_opts['bond-mode'] = bond_mode
 
     return port_opts
-
 
 def is_ovs_bridge_type_id(type_id):
     return type_id == nmclient.NM.DeviceType.OVS_BRIDGE
@@ -170,23 +167,54 @@ def _get_bridge_port_info(port_profile, devices_info):
     access vlan-mode (trunks are not supported).
     """
     port_info = {}
-
-    port_setting = port_profile.get_setting(nmclient.NM.SettingOvsPort)
-    vlan_mode = port_setting.props.vlan_mode
-
     port_name = port_profile.get_interface_name()
-    port_device = device.get_device_by_name(port_name)
-    port_slave_profiles = _get_slave_profiles(port_device, devices_info)
-    port_slave_names = [c.get_interface_name() for c in port_slave_profiles]
+    port_setting = port_profile.get_setting(nmclient.NM.SettingOvsPort)
+    ifaces_info = _get_ifaces_info(port_name, devices_info)
 
-    if port_slave_names:
-        iface_slave_name = port_slave_names[0]
-        port_info["name"] = iface_slave_name
-        if vlan_mode:
-            port_info["vlan-mode"] = vlan_mode
-            port_info["access-tag"] = port_setting.props.tag
+    if len(ifaces_info) >= 2:
+        # The port has multiple interfaces connected, treat it as a bonding.
+        port_info['name'] = port_name
+        port_info['type'] = OBPortType.BOND
+        port_info['link-aggregation'] = {
+            'mode': port_setting.props.bond_mode or 'TODO default mode',
+            'slaves': ifaces_info,
+        }
+    elif len(ifaces_info) == 1:
+        # The port has a single interface connected, reflect its information
+        # into the port itself.
+        iface_info = ifaces_info[0]
+        port_info.update(iface_info)
+    else:
+        # There are no interfaces connected, return empty configuration.
+        return {}
+
+    # Gather information about VLAN settings of the port
+    vlan_mode = port_setting.props.vlan_mode
+    if vlan_mode:
+        port_info['vlan-mode'] = vlan_mode
+        port_info['access-tag'] = port_setting.props.tag
 
     return port_info
+
+
+def _get_ifaces_info(port_name, devices_info):
+    port_device = device.get_device_by_name(port_name)
+    ifaces_info = [
+        {
+            'name': profile.get_interface_name(),
+            'type': _get_iface_type(profile.get_interface_name()),
+        }
+        for profile in _get_slave_profiles(port_device, devices_info)
+    ]
+    return ifaces_info
+
+
+def _get_iface_type(iface_name):
+    iface_device = device.get_device_by_name(iface_name)
+    if is_ovs_interface_type_id(iface_device.props.device_type):
+        return OBPortInterfaceType.INTERNAL
+    else:
+        return OBPortInterfaceType.SYSTEM
 
 
 def _get_bridge_options(bridge_device):

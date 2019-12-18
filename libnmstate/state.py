@@ -359,6 +359,7 @@ class State:
     def normalize_for_verification(self):
         self._clean_sanitize_ethernet()
         self._sort_lag_slaves()
+        self._sort_ovs_lag_slaves()
         self._sort_bridge_ports()
         self._canonicalize_ipv6()
         self._remove_iface_ipv6_link_local_addr()
@@ -539,6 +540,15 @@ class State:
     def _sort_lag_slaves(self):
         for ifstate in self.interfaces.values():
             ifstate.get("link-aggregation", {}).get("slaves", []).sort()
+
+
+
+    def _sort_ovs_lag_slaves(self):
+        for ifstate in six.viewvalues(self.interfaces):
+            for port in ifstate.get('bridge', {}).get('port', []):
+                port.get('link-aggregation', {}).get('slaves', []).sort(
+                    key=lambda k: k['name']
+                )
 
     def _sort_bridge_ports(self):
         for ifstate in self.interfaces.values():

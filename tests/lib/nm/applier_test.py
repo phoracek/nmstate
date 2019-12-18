@@ -246,3 +246,6 @@ class TestIfaceAdminStateControl:
         ]
         actual_calls = nm_device_mock.modify.mock_calls
         assert sorted(expected_calls) == sorted(actual_calls)
+
+
+# TODO: test new changes regarding OVS bonds

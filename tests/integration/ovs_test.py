@@ -103,3 +103,11 @@ def test_create_and_remove_ovs_bridge_with_internal_port_and_static_ip():
 
     assertlib.assert_absent(BRIDGE1)
     assertlib.assert_absent(PORT1)
+
+
+# TODO: test ovs bond (blocked by #513)
+# - minimal 2 nic bridge without extra options
+# - valid mode
+# - invalid mode
+# - invalid number of slaves
+# - add slave, remove slave (resize)

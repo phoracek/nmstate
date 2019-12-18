@@ -25,6 +25,8 @@ from libnmstate.schema import DNS
 from libnmstate.schema import Interface
 from libnmstate.schema import InterfaceIP
 from libnmstate.schema import InterfaceState
+from libnmstate.schema import OVSBridge
+from libnmstate.schema import OVSBridgePortType
 
 
 BRPORT_OPTIONS = "_brport_options"
@@ -92,12 +94,47 @@ def _get_bond_slaves_from_state(iface_state, default=()):
     return iface_state.get("link-aggregation", {}).get("slaves", default)
 
 
+# TODO rename to slaves/interfaces_metadata
 def _set_ovs_bridge_ports_metadata(master_state, slave_state):
+    """
+    TODO doc
+    ports or slaves?
+    """
     _set_common_slaves_metadata(master_state, slave_state)
+    # TODO doc, keeps info about the port - owner of the interface
+    # in the scope of bridge. This is really important since we
+    # later use this information to recognize whether the slave
+    # is internal/system or bonding.
+    # TODO as a result, desired state contains list of interfaces,
+    # we need to later recognize whether they should be connected
+    # to separate port or aggregated
+    slave_state[BRPORT_OPTIONS] = _find_ovs_bridge_port(
+        # TODO: how does the port name work?
+        # TODO: maybe get slave_state[name]?
+        master_state, OVSBridge.PORT_NAME
+    )
 
-    ports = master_state.get("bridge", {}).get("port", [])
-    port = next(filter(lambda n: n["name"] == slave_state["name"], ports), {})
-    slave_state[BRPORT_OPTIONS] = port
+
+# TODO: rename to ovs_bridge_slave_port
+# TODO rname port_name to slave_name
+def _find_ovs_bridge_port(bridge_state, port_name):
+    """
+    TODO doc
+    return ovs bridge's port that is direct owner of given slave inteface
+    """
+    bridge_subtree = bridge_state.get(OVSBridge.CONFIG_SUBTREE, {})
+    ports = bridge_subtree.get(OVSBridge.PORT_SUBTREE, [])
+    for port in ports:
+        if port[OVSBridge.PORT_TYPE] == OVSBridgePortType.BOND:
+            la_subtree = port.get(OVSBridgePortType.LA_SUBTREE, {})
+            slaves = la_subtree.get(OVSBridge.LA_SLAVES_SUBTREE, [])
+            for slave in slaves:
+                if slave[OVSBridge.LA_SLAVE_NAME] == port_name:
+                    return port
+        else:
+            if port[OVSBridge.PORT_NAME] == port_name:
+                return port
+    return None
 
 
 def _set_common_slaves_metadata(master_state, slave_state):
@@ -105,12 +142,31 @@ def _set_common_slaves_metadata(master_state, slave_state):
     slave_state[MASTER_TYPE] = master_state.get("type")
 
 
-def _get_ovs_slaves_from_state(iface_state, default=()):
-    ports = iface_state.get("bridge", {}).get("port")
-    if ports is None:
-        return default
-    return [p["name"] for p in ports]
+# TODO: rename to ovs_bridge_slaves
+def _get_ovs_slaves_from_state(bridge_state, default=()):
+    """
+    TODO doc
+    TODO Returns names of all interfaces connected to ports of the bridge. For
+    internal and system interfaces, those would match name of the port. For
+    bond slave interfaces, we need collect names of those slaves.
+    """
+    ovs_slaves = []
 
+    bridge_subtree = bridge_state.get(OVSBridge.CONFIG_SUBTREE, {})
+    ports = bridge_subtree.get(OVSBridge.PORT_SUBTREE, [])
+    for port in ports:
+        if port[OVSBridge.PORT_TYPE] == OVSBridgePortType.BOND:
+            la_subtree = port.get(OVSBridgePortType.LA_SUBTREE, {})
+            slaves = la_subtree.get(OVSBridge.LA_SLAVES_SUBTREE, [])
+            for slave in slaves:
+                ovs_slaves.append(slave[OVSBridge.LA_SLAVE_NAME])
+        else:
+            ovs_slaves.append(port[OVSBridge.PORT_NAME])
+
+    if not ovs_slaves:
+        return default
+
+    return ovs_slaves
 
 def _generate_link_master_metadata(
     ifaces_desired_state,
